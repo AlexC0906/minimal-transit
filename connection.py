@@ -8,8 +8,8 @@ class Connection:
         self.start = start_station
         self.end = end_station
 
-    def draw(self, surface):
-        pygame.draw.line(surface, LINE_COLOR, self.start.position, self.end.position, 4)
+    def draw(self, surface, color=LINE_COLOR):
+        pygame.draw.line(surface, color, self.start.position, self.end.position, 4)
 
     def contains_pair(self, first_station, second_station):
         return (
@@ -17,3 +17,6 @@ class Connection:
         ) or (
             self.start is second_station and self.end is first_station
         )
+
+    def connects(self, first_station, second_station):
+        return self.contains_pair(first_station, second_station)

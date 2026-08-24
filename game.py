@@ -9,6 +9,7 @@ from config import (
     FPS,
     HEIGHT,
     LINE_COLORS,
+    MAX_LINES,
     MAX_STATIONS,
     MAX_MISSED_PASSENGERS,
     MAX_WAITING_PASSENGERS,
@@ -43,6 +44,9 @@ class Game:
         self.station_spawn_timer = 0.0
         self.is_drawing = False
         self.start_station = None
+        self.drawing_line = None
+        self.drawing_endpoint = None
+        self.drawing_segment = None
         self.current_mouse_pos = (0, 0)
 
     def handle_events(self):
@@ -63,12 +67,35 @@ class Game:
         return True
 
     def start_drawing(self, mouse_pos):
+        self.drawing_line = None
+        self.drawing_endpoint = None
+        self.drawing_segment = None
+        for line in self.lines:
+            endpoint = line.endpoint_at(mouse_pos)
+            if endpoint:
+                self.drawing_line = line
+                self.drawing_endpoint = endpoint
+                break
+        if self.drawing_line:
+            self.is_drawing = True
+            self.current_mouse_pos = mouse_pos
+            return
+
         for station in self.stations:
             if station.contains(mouse_pos):
                 self.is_drawing = True
                 self.start_station = station
                 self.current_mouse_pos = mouse_pos
                 return
+
+        self.drawing_line = next(
+            (line for line in self.lines if line.contains_point(mouse_pos)),
+            None,
+        )
+        if self.drawing_line:
+            self.drawing_segment = self.drawing_line.segment_index_at(mouse_pos)
+            self.is_drawing = True
+            self.current_mouse_pos = mouse_pos
 
     def finish_drawing(self, mouse_pos):
         if not self.is_drawing:
@@ -82,14 +109,51 @@ class Game:
             ),
             None,
         )
-        if target_station and not self.has_connection(self.start_station, target_station):
-            color = LINE_COLORS[len(self.lines) % len(LINE_COLORS)]
-            line = MetroLine(self.start_station, target_station, color)
-            line.train.service_station(line.start)
-            self.lines.append(line)
+        if target_station:
+            if self.drawing_line:
+                opposite_endpoint = (
+                    self.drawing_endpoint == "start"
+                    and target_station is self.drawing_line.end
+                ) or (
+                    self.drawing_endpoint == "end"
+                    and target_station is self.drawing_line.start
+                )
+                removing_start = (
+                    self.drawing_endpoint == "start"
+                    and len(self.drawing_line.stations) > 2
+                    and target_station is self.drawing_line.stations[1]
+                )
+                removing_end = (
+                    self.drawing_endpoint == "end"
+                    and len(self.drawing_line.stations) > 2
+                    and target_station is self.drawing_line.stations[-2]
+                )
+                if removing_start:
+                    self.drawing_line.remove_endpoint("start")
+                elif removing_end:
+                    self.drawing_line.remove_endpoint("end")
+                elif opposite_endpoint:
+                    self.drawing_line.close_loop()
+                elif not self.drawing_line.contains_station(target_station):
+                    if self.drawing_segment is not None:
+                        self.drawing_line.insert_station(target_station, self.drawing_segment)
+                    else:
+                        endpoint = self.drawing_endpoint or "end"
+                        self.drawing_line.add_station(target_station, endpoint)
+            elif (
+                len(self.lines) < MAX_LINES
+                and not self.has_connection(self.start_station, target_station)
+            ):
+                color = LINE_COLORS[len(self.lines) % len(LINE_COLORS)]
+                line = MetroLine(self.start_station, target_station, color)
+                line.train.service_station(line.start)
+                self.lines.append(line)
 
         self.is_drawing = False
         self.start_station = None
+        self.drawing_line = None
+        self.drawing_endpoint = None
+        self.drawing_segment = None
 
     def has_connection(self, first_station, second_station):
         return any(line.contains_pair(first_station, second_station) for line in self.lines)
@@ -111,6 +175,7 @@ class Game:
             self.spawn_station()
 
         for line in self.lines:
+            line.train.network_lines = self.lines
             line.train.update(delta_time)
             self.score += line.train.delivered
             line.train.delivered = 0
@@ -142,17 +207,16 @@ class Game:
                 return routes[current]
 
             for line in self.lines:
-                connection = line.connection
-                if connection.start is current:
-                    neighbor = connection.end
-                elif connection.end is current:
-                    neighbor = connection.start
-                else:
-                    continue
-
-                if neighbor not in routes:
-                    routes[neighbor] = routes[current] + [neighbor]
-                    pending.append(neighbor)
+                for first, second in zip(line.stations, line.stations[1:]):
+                    if first is current:
+                        neighbor = second
+                    elif second is current:
+                        neighbor = first
+                    else:
+                        continue
+                    if neighbor not in routes:
+                        routes[neighbor] = routes[current] + [neighbor]
+                        pending.append(neighbor)
         return None
 
     def spawn_passengers(self):
@@ -187,6 +251,7 @@ class Game:
 
         for line in self.lines:
             line.draw(self.screen)
+            line.draw_endpoints(self.screen)
 
         if self.is_drawing and self.start_station:
             pygame.draw.line(
@@ -201,6 +266,8 @@ class Game:
             line.train.draw(self.screen)
         for station in self.stations:
             station.draw(self.screen)
+        for line in self.lines:
+            line.draw_endpoints(self.screen)
 
         self.draw_hud()
 

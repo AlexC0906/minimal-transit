@@ -1,16 +1,17 @@
 import pygame
 
-from config import PASSENGER_COLOR, SHAPE_COLORS
+from config import SHAPE_COLORS
 
 
 class Passenger:
     def __init__(self, destination_shape):
         self.destination_shape = destination_shape
+        self.target_shape = destination_shape
 
-    def draw(self, surface, position):
+    def draw(self, surface, position, size=5):
         color = SHAPE_COLORS[self.destination_shape]
         x, y = position
-        radius = 5
+        radius = size
         if self.destination_shape == "circle":
             pygame.draw.circle(surface, color, position, radius)
         elif self.destination_shape == "square":
@@ -20,4 +21,3 @@ class Passenger:
             points = [(x, y - radius), (x - radius, y + radius), (x + radius, y + radius)]
             pygame.draw.polygon(surface, color, points)
 
-        pygame.draw.circle(surface, PASSENGER_COLOR, position, 2)

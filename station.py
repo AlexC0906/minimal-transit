@@ -24,17 +24,13 @@ class Station:
         color = SHAPE_COLORS[self.shape]
         if self.shape == "circle":
             pygame.draw.circle(surface, color, self.position, self.radius)
-            pygame.draw.circle(surface, BG_COLOR, self.position, self.radius - 5)
         elif self.shape == "square":
             square = pygame.Rect(0, 0, self.radius * 2, self.radius * 2)
             square.center = self.position
             pygame.draw.rect(surface, color, square)
-            pygame.draw.rect(surface, BG_COLOR, square.inflate(-10, -10))
         else:
             points = self._triangle_points(self.radius)
-            inner_points = self._triangle_points(self.radius - 5)
             pygame.draw.polygon(surface, color, points)
-            pygame.draw.polygon(surface, BG_COLOR, inner_points)
 
         if len(self.waiting_passengers) >= 6:
             pygame.draw.circle(surface, WARNING_COLOR, self.position, self.radius + 5, 2)

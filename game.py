@@ -17,8 +17,10 @@ from config import (
     PASSENGER_SPAWN_INTERVAL,
     STATION_MARGIN,
     STATION_SPAWN_INTERVAL,
+    TRAIN_CREDIT_INTERVAL,
     WIDTH,
 )
+from background import Background
 from line import MetroLine
 from passenger import Passenger
 from station import Station
@@ -30,6 +32,7 @@ class Game:
         self.screen = pygame.display.set_mode((WIDTH, HEIGHT))
         pygame.display.set_caption("Minimalist Traffic Management")
         self.clock = pygame.time.Clock()
+        self.background = Background()
 
         self.stations = [
             Station(200, 300, "circle"),
@@ -48,6 +51,12 @@ class Game:
         self.drawing_endpoint = None
         self.drawing_segment = None
         self.current_mouse_pos = (0, 0)
+        self.add_train_button = pygame.Rect(WIDTH - 170, 18, 145, 38)
+        self.add_train_mode = False
+        self.dragging_train = None
+        self.dragging_new_train = False
+        self.train_credits = 1
+        self.train_credit_timer = 0.0
 
     def handle_events(self):
         for event in pygame.event.get():
@@ -59,19 +68,88 @@ class Game:
             if self.game_over:
                 continue
             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                if self.add_train_button.collidepoint(event.pos):
+                    if self.train_credits <= 0:
+                        continue
+                    self.add_train_mode = True
+                    self.dragging_new_train = True
+                    self.current_mouse_pos = event.pos
+                    self.is_drawing = False
+                    continue
+                if self.add_train_mode:
+                    continue
+            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                 self.start_drawing(event.pos)
             elif event.type == pygame.MOUSEMOTION and self.is_drawing:
                 self.current_mouse_pos = event.pos
+            elif event.type == pygame.MOUSEMOTION and (
+                self.dragging_train or self.dragging_new_train
+            ):
+                self.current_mouse_pos = event.pos
             elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
+                if self.dragging_new_train:
+                    self.finish_new_train_drag(event.pos)
+                    continue
+                if self.dragging_train:
+                    self.finish_train_drag(event.pos)
+                    continue
                 self.finish_drawing(event.pos)
         return True
+
+    def finish_new_train_drag(self, mouse_pos):
+        target_line = next(
+            (
+                line
+                for line in self.lines
+                if line.contains_point(mouse_pos, 18)
+                or any(station.contains(mouse_pos) for station in line.stations)
+            ),
+            None,
+        )
+        if target_line:
+            station_index = min(
+                range(len(target_line.stations)),
+                key=lambda index: pygame.Vector2(
+                    target_line.stations[index].position
+                ).distance_to(mouse_pos),
+            )
+            new_train = target_line.add_train(station_index)
+            if new_train:
+                new_train.network_lines = self.lines
+                self.train_credits -= 1
+        self.dragging_new_train = False
+        self.add_train_mode = False
+
+    def start_train_drag(self, mouse_pos):
+        for line in reversed(self.lines):
+            for train in line.trains:
+                if pygame.Vector2(train.position).distance_to(mouse_pos) <= 30:
+                    self.dragging_train = train
+                    self.current_mouse_pos = mouse_pos
+                    return
+
+    def finish_train_drag(self, mouse_pos):
+        target_line = next(
+            (
+                line
+                for line in self.lines
+                if line.contains_point(mouse_pos, 18)
+                or any(station.contains(mouse_pos) for station in line.stations)
+            ),
+            None,
+        )
+        if target_line:
+            new_train = target_line.add_train()
+            new_train.network_lines = self.lines
+        self.dragging_train = None
+        self.add_train_mode = False
 
     def start_drawing(self, mouse_pos):
         self.drawing_line = None
         self.drawing_endpoint = None
         self.drawing_segment = None
-        for line in self.lines:
-            endpoint = line.endpoint_at(mouse_pos)
+        for line_index, line in enumerate(self.lines):
+            endpoint = line.endpoint_at(mouse_pos, line_index, len(self.lines))
             if endpoint:
                 self.drawing_line = line
                 self.drawing_endpoint = endpoint
@@ -161,6 +239,10 @@ class Game:
     def update(self, delta_time):
         if self.game_over:
             return
+        self.train_credit_timer += delta_time
+        while self.train_credit_timer >= TRAIN_CREDIT_INTERVAL:
+            self.train_credit_timer -= TRAIN_CREDIT_INTERVAL
+            self.train_credits += 1
         self.passenger_spawn_timer += delta_time
         if self.passenger_spawn_timer >= PASSENGER_SPAWN_INTERVAL:
             self.passenger_spawn_timer = 0.0
@@ -176,9 +258,11 @@ class Game:
 
         for line in self.lines:
             line.train.network_lines = self.lines
-            line.train.update(delta_time)
-            self.score += line.train.delivered
-            line.train.delivered = 0
+            for train in line.trains:
+                train.network_lines = self.lines
+                train.update(delta_time)
+                self.score += train.delivered
+                train.delivered = 0
 
     def find_random_route(self):
         if len(self.stations) < 2 or not self.lines:
@@ -247,27 +331,63 @@ class Game:
         return False
 
     def draw(self):
-        self.screen.fill(BG_COLOR)
+        self.background.draw(self.screen)
+        line_count = len(self.lines)
 
-        for line in self.lines:
-            line.draw(self.screen)
-            line.draw_endpoints(self.screen)
+        shared_segments = {}
+        for line_index, line in enumerate(self.lines):
+            segments = list(zip(line.stations, line.stations[1:]))
+            if line.is_loop:
+                segments.append((line.stations[-1], line.stations[0]))
+            for start, end in segments:
+                key = frozenset((id(start), id(end)))
+                shared_segments.setdefault(key, []).append(line_index)
 
-        if self.is_drawing and self.start_station:
+        for line_index, line in enumerate(self.lines):
+            offsets = []
+            segments = list(zip(line.stations, line.stations[1:]))
+            if line.is_loop:
+                segments.append((line.stations[-1], line.stations[0]))
+            for start, end in segments:
+                key = frozenset((id(start), id(end)))
+                siblings = shared_segments[key]
+                rank = siblings.index(line_index)
+                offsets.append((start, end, (rank - (len(siblings) - 1) / 2) * 7))
+            line.draw(self.screen, offsets)
+            line.draw_endpoints(self.screen, line_index, line_count)
+
+        if self.is_drawing and (self.start_station or self.drawing_line):
+            if self.drawing_line:
+                drawing_start = (
+                    self.drawing_line.handle_position(
+                        self.drawing_endpoint,
+                        self.lines.index(self.drawing_line),
+                        len(self.lines),
+                    )
+                    if self.drawing_endpoint
+                    else self.current_mouse_pos
+                )
+                drawing_color = self.drawing_line.color
+            else:
+                drawing_start = self.start_station.position
+                drawing_color = LINE_COLORS[len(self.lines)]
             pygame.draw.line(
                 self.screen,
-                DRAWING_COLOR,
-                self.start_station.position,
+                drawing_color,
+                drawing_start,
                 self.current_mouse_pos,
                 4,
             )
 
-        for line in self.lines:
-            line.train.draw(self.screen)
         for station in self.stations:
             station.draw(self.screen)
         for line in self.lines:
-            line.draw_endpoints(self.screen)
+            for train in line.trains:
+                train.draw(self.screen)
+        for line_index, line in enumerate(self.lines):
+            line.draw_endpoints(self.screen, line_index, line_count)
+
+        self.draw_controls()
 
         self.draw_hud()
 
@@ -288,7 +408,7 @@ class Game:
         score_text = font.render(f"Delivered: {self.score}", True, (29, 29, 31))
         network_text = font.render(
             f"Stations: {len(self.stations)}  Lines: {len(self.lines)}  "
-            f"Trains: {len(self.lines)}  Waiting: "
+            f"Trains: {sum(len(line.trains) for line in self.lines)}  Waiting: "
             f"{sum(len(station.waiting_passengers) for station in self.stations)}  "
             f"Missed: {self.missed_passengers}/{MAX_MISSED_PASSENGERS}",
             True,
@@ -296,6 +416,27 @@ class Game:
         )
         self.screen.blit(score_text, (24, 20))
         self.screen.blit(network_text, (24, 48))
+
+    def draw_controls(self):
+        color = (29, 29, 31) if self.train_credits else (150, 150, 155)
+        pygame.draw.rect(self.screen, color, self.add_train_button, border_radius=6)
+        font = pygame.font.Font(None, 24)
+        label = font.render("+ METRO", True, (255, 255, 255))
+        self.screen.blit(label, label.get_rect(center=self.add_train_button.center))
+        timer_font = pygame.font.Font(None, 20)
+        if self.train_credits:
+            timer_text = f"Available: {self.train_credits}"
+        else:
+            remaining = max(0, int(TRAIN_CREDIT_INTERVAL - self.train_credit_timer))
+            timer_text = f"Next metro: {remaining // 60}:{remaining % 60:02d}"
+        timer = timer_font.render(timer_text, True, (100, 100, 105))
+        timer_position = (self.add_train_button.centerx, self.add_train_button.bottom + 14)
+        self.screen.blit(timer, timer.get_rect(center=timer_position))
+        if self.dragging_new_train:
+            position = (round(self.current_mouse_pos[0]), round(self.current_mouse_pos[1]))
+            ghost = pygame.Rect(0, 0, 34, 18)
+            ghost.center = position
+            pygame.draw.rect(self.screen, (16, 16, 16), ghost, border_radius=8)
 
     def run(self):
         running = True

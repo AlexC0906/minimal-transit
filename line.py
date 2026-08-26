@@ -2,7 +2,7 @@ from connection import Connection
 from train import Train
 import pygame
 
-from config import MAX_TRAINS_PER_LINE
+from config import LINE_WIDTH, MAX_TRAINS_PER_LINE
 
 
 class MetroLine:
@@ -23,6 +23,12 @@ class MetroLine:
             train.direction = -1
         self.trains.append(train)
         return train
+
+    def remove_train(self, train):
+        if train in self.trains:
+            self.trains.remove(train)
+            return True
+        return False
 
     @property
     def start(self):
@@ -144,10 +150,12 @@ class MetroLine:
             direction = end_point - start_point
             offset = offsets[index][2] if offsets else 0
             if offset and direction.length_squared():
+                if id(start) > id(end):
+                    direction = -direction
                 shift = direction.normalize().rotate(90) * offset
                 start_point += shift
                 end_point += shift
-            pygame.draw.line(surface, self.color, start_point, end_point, 4)
+            pygame.draw.line(surface, self.color, start_point, end_point, LINE_WIDTH)
 
     def contains_pair(self, first_station, second_station):
         return any(

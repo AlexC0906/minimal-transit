@@ -9,8 +9,10 @@ from config import (
     FPS,
     HEIGHT,
     LINE_COLORS,
+    LINE_WIDTH,
     MAX_LINES,
     MAX_STATIONS,
+    MAX_TRAINS_PER_LINE,
     MAX_MISSED_PASSENGERS,
     MAX_WAITING_PASSENGERS,
     MIN_STATION_DISTANCE,
@@ -19,6 +21,7 @@ from config import (
     STATION_SPAWN_INTERVAL,
     TRAIN_CREDIT_INTERVAL,
     WIDTH,
+    SHARED_LINE_OFFSET,
 )
 from background import Background
 from line import MetroLine
@@ -54,6 +57,8 @@ class Game:
         self.add_train_button = pygame.Rect(WIDTH - 170, 18, 145, 38)
         self.add_train_mode = False
         self.dragging_train = None
+        self.dragging_train_line = None
+        self.pending_train_moves = {}
         self.dragging_new_train = False
         self.train_credits = 1
         self.train_credit_timer = 0.0
@@ -79,6 +84,8 @@ class Game:
                 if self.add_train_mode:
                     continue
             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                if self.start_train_drag(event.pos):
+                    continue
                 self.start_drawing(event.pos)
             elif event.type == pygame.MOUSEMOTION and self.is_drawing:
                 self.current_mouse_pos = event.pos
@@ -100,7 +107,8 @@ class Game:
         target_line = next(
             (
                 line
-                for line in self.lines
+                for line in reversed(self.lines)
+                if line is not self.dragging_train_line
                 if line.contains_point(mouse_pos, 18)
                 or any(station.contains(mouse_pos) for station in line.stations)
             ),
@@ -125,8 +133,10 @@ class Game:
             for train in line.trains:
                 if pygame.Vector2(train.position).distance_to(mouse_pos) <= 30:
                     self.dragging_train = train
+                    self.dragging_train_line = line
                     self.current_mouse_pos = mouse_pos
-                    return
+                    return True
+        return False
 
     def finish_train_drag(self, mouse_pos):
         target_line = next(
@@ -139,9 +149,16 @@ class Game:
             None,
         )
         if target_line:
-            new_train = target_line.add_train()
-            new_train.network_lines = self.lines
+            if target_line is self.dragging_train_line or len(target_line.trains) < MAX_TRAINS_PER_LINE:
+                station_index = min(
+                    range(len(target_line.stations)),
+                    key=lambda index: pygame.Vector2(
+                        target_line.stations[index].position
+                    ).distance_to(mouse_pos),
+                )
+                self.pending_train_moves[self.dragging_train] = (target_line, station_index)
         self.dragging_train = None
+        self.dragging_train_line = None
         self.add_train_mode = False
 
     def start_drawing(self, mouse_pos):
@@ -160,7 +177,7 @@ class Game:
             return
 
         for station in self.stations:
-            if station.contains(mouse_pos):
+            if station.contains(mouse_pos) and len(self.lines) < MAX_LINES:
                 self.is_drawing = True
                 self.start_station = station
                 self.current_mouse_pos = mouse_pos
@@ -183,7 +200,7 @@ class Game:
             (
                 station
                 for station in self.stations
-                if station is not self.start_station and station.contains(mouse_pos)
+                    if station is not self.start_station and station.contains(mouse_pos)
             ),
             None,
         )
@@ -218,11 +235,8 @@ class Game:
                     else:
                         endpoint = self.drawing_endpoint or "end"
                         self.drawing_line.add_station(target_station, endpoint)
-            elif (
-                len(self.lines) < MAX_LINES
-                and not self.has_connection(self.start_station, target_station)
-            ):
-                color = LINE_COLORS[len(self.lines) % len(LINE_COLORS)]
+            elif len(self.lines) < MAX_LINES:
+                color = self.next_line_color()
                 line = MetroLine(self.start_station, target_station, color)
                 line.train.service_station(line.start)
                 self.lines.append(line)
@@ -235,6 +249,10 @@ class Game:
 
     def has_connection(self, first_station, second_station):
         return any(line.contains_pair(first_station, second_station) for line in self.lines)
+
+    def next_line_color(self):
+        used_colors = {line.color for line in self.lines}
+        return next(color for color in LINE_COLORS if color not in used_colors)
 
     def update(self, delta_time):
         if self.game_over:
@@ -260,9 +278,31 @@ class Game:
             line.train.network_lines = self.lines
             for train in line.trains:
                 train.network_lines = self.lines
-                train.update(delta_time)
+                if train is not self.dragging_train:
+                    train.update(delta_time)
                 self.score += train.delivered
                 train.delivered = 0
+                if train.just_arrived and train in self.pending_train_moves:
+                    target_line, target_station = self.pending_train_moves.pop(train)
+                    self.move_train_to_line(train, line, target_line, target_station)
+
+    def move_train_to_line(self, train, source_line, target_line, target_station):
+        train.unload_all(source_line.stations[train.station_index])
+        station_index = target_line.stations.index(target_station)
+        if source_line is not target_line:
+            source_line.remove_train(train)
+            target_line.trains.append(train)
+        train.route = target_line.stations
+        train.station_index = station_index
+        train.direction = -1 if (
+            not target_line.is_loop
+            and station_index == len(target_line.stations) - 1
+        ) else 1
+        train.progress = 0.0
+        train.current_speed = 0.0
+        train.stop_timer = 0.0
+        train.is_loop = target_line.is_loop
+        train.network_lines = self.lines
 
     def find_random_route(self):
         if len(self.stations) < 2 or not self.lines:
@@ -352,7 +392,9 @@ class Game:
                 key = frozenset((id(start), id(end)))
                 siblings = shared_segments[key]
                 rank = siblings.index(line_index)
-                offsets.append((start, end, (rank - (len(siblings) - 1) / 2) * 7))
+                offsets.append(
+                    (start, end, (rank - (len(siblings) - 1) / 2) * SHARED_LINE_OFFSET)
+                )
             line.draw(self.screen, offsets)
             line.draw_endpoints(self.screen, line_index, line_count)
 
@@ -370,7 +412,7 @@ class Game:
                 drawing_color = self.drawing_line.color
             else:
                 drawing_start = self.start_station.position
-                drawing_color = LINE_COLORS[len(self.lines)]
+                drawing_color = self.next_line_color()
             pygame.draw.line(
                 self.screen,
                 drawing_color,
@@ -383,7 +425,8 @@ class Game:
             station.draw(self.screen)
         for line in self.lines:
             for train in line.trains:
-                train.draw(self.screen)
+                if train is not self.dragging_train:
+                    train.draw(self.screen)
         for line_index, line in enumerate(self.lines):
             line.draw_endpoints(self.screen, line_index, line_count)
 
@@ -437,6 +480,11 @@ class Game:
             ghost = pygame.Rect(0, 0, 34, 18)
             ghost.center = position
             pygame.draw.rect(self.screen, (16, 16, 16), ghost, border_radius=8)
+        elif self.dragging_train:
+            position = (round(self.current_mouse_pos[0]), round(self.current_mouse_pos[1]))
+            ghost = pygame.Rect(0, 0, 34, 18)
+            ghost.center = position
+            pygame.draw.rect(self.screen, self.dragging_train.color, ghost, border_radius=8)
 
     def run(self):
         running = True

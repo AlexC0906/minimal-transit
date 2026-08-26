@@ -24,6 +24,7 @@ class Train:
         self.delivered = 0
         self.stop_timer = 0.0
         self.is_loop = False
+        self.just_arrived = False
 
     def next_station_index(self):
         if self.is_loop:
@@ -37,6 +38,7 @@ class Train:
         return start.lerp(end, self.progress)
 
     def update(self, delta_time):
+        self.just_arrived = False
         if self.is_stopped:
             return
         if self.stop_timer > 0:
@@ -70,6 +72,7 @@ class Train:
         self.progress += distance_travelled / distance
 
     def arrive_at(self, station_index):
+        self.just_arrived = True
         self.station_index = station_index
         self.progress = 0.0
         self.current_speed = 0.0
@@ -79,6 +82,10 @@ class Train:
             self.station_index == 0 or self.station_index == len(self.route) - 1
         ):
             self.direction *= -1
+
+    def unload_all(self, station):
+        station.waiting_passengers.extend(self.passengers)
+        self.passengers.clear()
 
     @property
     def is_stopped(self):

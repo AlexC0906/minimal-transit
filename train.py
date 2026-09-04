@@ -84,6 +84,8 @@ class Train:
             self.direction *= -1
 
     def unload_all(self, station):
+        for passenger in self.passengers:
+            passenger.target_shape = passenger.destination_shape
         station.waiting_passengers.extend(self.passengers)
         self.passengers.clear()
 

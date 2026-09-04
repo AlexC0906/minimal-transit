@@ -149,7 +149,7 @@ class Game:
             None,
         )
         if target_line:
-            if target_line is self.dragging_train_line or len(target_line.trains) < MAX_TRAINS_PER_LINE:
+            if len(target_line.trains) < MAX_TRAINS_PER_LINE:
                 station_index = min(
                     range(len(target_line.stations)),
                     key=lambda index: pygame.Vector2(
@@ -283,12 +283,12 @@ class Game:
                 self.score += train.delivered
                 train.delivered = 0
                 if train.just_arrived and train in self.pending_train_moves:
-                    target_line, target_station = self.pending_train_moves.pop(train)
-                    self.move_train_to_line(train, line, target_line, target_station)
+                    target_line, station_index = self.pending_train_moves.pop(train)
+                    self.move_train_to_line(train, line, target_line, station_index)
 
-    def move_train_to_line(self, train, source_line, target_line, target_station):
-        train.unload_all(source_line.stations[train.station_index])
-        station_index = target_line.stations.index(target_station)
+    def move_train_to_line(self, train, source_line, target_line, station_index):
+        current_station = train.route[train.station_index]
+        train.unload_all(current_station)
         if source_line is not target_line:
             source_line.remove_train(train)
             target_line.trains.append(train)

@@ -1,4 +1,4 @@
-from connection import Connection
+from connection import Connection, draw_smooth_line
 from train import Train
 import pygame
 
@@ -155,7 +155,7 @@ class MetroLine:
                 shift = direction.normalize().rotate(90) * offset
                 start_point += shift
                 end_point += shift
-            pygame.draw.line(surface, self.color, start_point, end_point, LINE_WIDTH)
+            draw_smooth_line(surface, self.color, start_point, end_point, LINE_WIDTH)
 
     def contains_pair(self, first_station, second_station):
         return any(

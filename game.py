@@ -55,6 +55,8 @@ class Game:
         self.drawing_segment = None
         self.current_mouse_pos = (0, 0)
         self.add_train_button = pygame.Rect(WIDTH - 170, 18, 145, 38)
+        self.pause_button = pygame.Rect(WIDTH - 170, 66, 145, 34)
+        self.is_paused = False
         self.add_train_mode = False
         self.dragging_train = None
         self.dragging_train_line = None
@@ -70,9 +72,21 @@ class Game:
             if event.type == pygame.KEYDOWN and event.key == pygame.K_r and self.game_over:
                 self.__init__()
                 return True
+            if event.type == pygame.KEYDOWN and event.key == pygame.K_SPACE:
+                self.is_paused = not self.is_paused
+                self.is_drawing = False
+                self.dragging_train = None
+                self.dragging_new_train = False
+                continue
             if self.game_over:
                 continue
             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                if self.pause_button.collidepoint(event.pos):
+                    self.is_paused = not self.is_paused
+                    self.is_drawing = False
+                    self.dragging_train = None
+                    self.dragging_new_train = False
+                    continue
                 if self.add_train_button.collidepoint(event.pos):
                     if self.train_credits <= 0:
                         continue
@@ -255,7 +269,7 @@ class Game:
         return next(color for color in LINE_COLORS if color not in used_colors)
 
     def update(self, delta_time):
-        if self.game_over:
+        if self.game_over or self.is_paused:
             return
         self.train_credit_timer += delta_time
         while self.train_credit_timer >= TRAIN_CREDIT_INTERVAL:
@@ -475,6 +489,11 @@ class Game:
         timer = timer_font.render(timer_text, True, (100, 100, 105))
         timer_position = (self.add_train_button.centerx, self.add_train_button.bottom + 14)
         self.screen.blit(timer, timer.get_rect(center=timer_position))
+        pause_color = (235, 75, 75) if self.is_paused else (29, 29, 31)
+        pygame.draw.rect(self.screen, pause_color, self.pause_button, border_radius=6)
+        pause_label = "RESUME" if self.is_paused else "PAUSE"
+        pause_text = font.render(pause_label, True, (255, 255, 255))
+        self.screen.blit(pause_text, pause_text.get_rect(center=self.pause_button.center))
         if self.dragging_new_train:
             position = (round(self.current_mouse_pos[0]), round(self.current_mouse_pos[1]))
             ghost = pygame.Rect(0, 0, 34, 18)

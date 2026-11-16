@@ -1,8 +1,9 @@
-from connection import Connection, draw_smooth_line
-from train import Train
 import pygame
 
 from config import LINE_WIDTH, MAX_TRAINS_PER_LINE
+from connection import closest_point_ratio, segment_shift
+from render import draw_disc, draw_thick_line
+from train import Train
 
 
 class MetroLine:
@@ -10,19 +11,30 @@ class MetroLine:
         self.stations = [start_station, end_station]
         self.color = color
         self.is_loop = False
-        self.train = Train(self.stations)
-        self.trains = [self.train]
+        self.trains = []
+        self.add_train(0)
 
+    # ------------------------------------------------------------------ trains
     def add_train(self, station_index=0):
         if len(self.trains) >= MAX_TRAINS_PER_LINE:
             return None
-        train = Train(self.stations)
+        train = Train(self.stations, self.color)
+        self.attach_train(train, station_index)
+        return train
+
+    def attach_train(self, train, station_index):
+        train.route = self.stations
+        train.color = self.color
         train.is_loop = self.is_loop
         train.station_index = station_index
-        if not self.is_loop and station_index == len(self.stations) - 1:
-            train.direction = -1
-        self.trains.append(train)
-        return train
+        train.direction = -1 if (
+            not self.is_loop and station_index == len(self.stations) - 1
+        ) else 1
+        train.progress = 0.0
+        train.current_speed = 0.0
+        train.stop_timer = 0.0
+        if train not in self.trains:
+            self.trains.append(train)
 
     def remove_train(self, train):
         if train in self.trains:
@@ -30,6 +42,17 @@ class MetroLine:
             return True
         return False
 
+    def _edit_route(self, edit):
+        """Apply a route edit and re-seat every train on the new route."""
+        positions = [(train, train.position) for train in self.trains]
+        result = edit()
+        for train, position in positions:
+            train.route = self.stations
+            train.is_loop = self.is_loop
+            train.snap_to_route(position)
+        return result
+
+    # ------------------------------------------------------------------ editing
     @property
     def start(self):
         return self.stations[0]
@@ -38,47 +61,41 @@ class MetroLine:
     def end(self):
         return self.stations[-1]
 
+    @property
+    def segments(self):
+        segments = list(zip(self.stations, self.stations[1:]))
+        if self.is_loop:
+            segments.append((self.stations[-1], self.stations[0]))
+        return segments
+
     def add_station(self, station, endpoint="end"):
-        if station not in self.stations:
-            if endpoint == "start":
-                self.stations.insert(0, station)
-                for train in self.trains:
-                    train.station_index += 1
-            else:
-                self.stations.append(station)
-            for train in self.trains:
-                train.route = self.stations
+        if station in self.stations:
+            return
+        if endpoint == "start":
+            self._edit_route(lambda: self.stations.insert(0, station))
+        else:
+            self._edit_route(lambda: self.stations.append(station))
 
     def remove_endpoint(self, endpoint):
-        if len(self.stations) <= 2:
+        if len(self.stations) <= 2 or self.is_loop:
             return False
-        if endpoint == "start":
-            self.stations.pop(0)
-            for train in self.trains:
-                train.station_index = max(0, train.station_index - 1)
-        else:
-            self.stations.pop()
-            for train in self.trains:
-                train.station_index = min(train.station_index, len(self.stations) - 1)
+        index = 0 if endpoint == "start" else -1
+        removed = self.stations[index]
+        self._edit_route(lambda: self.stations.pop(index))
         for train in self.trains:
-            train.route = self.stations
+            for passenger in train.passengers:
+                if passenger.target_station is removed:
+                    passenger.target_station = None
         return True
 
     def insert_station(self, station, segment_index):
         if station in self.stations:
             return
-        insert_index = segment_index + 1
-        self.stations.insert(insert_index, station)
-        for train in self.trains:
-            if insert_index <= train.station_index:
-                train.station_index += 1
-            train.route = self.stations
+        self._edit_route(lambda: self.stations.insert(segment_index + 1, station))
 
     def close_loop(self):
         if len(self.stations) >= 3:
-            self.is_loop = True
-            for train in self.trains:
-                train.is_loop = True
+            self._edit_route(lambda: setattr(self, "is_loop", True))
 
     def contains_station(self, station):
         return station in self.stations
@@ -88,39 +105,32 @@ class MetroLine:
 
     def segment_index_at(self, point, tolerance=10):
         target = pygame.Vector2(point)
-        for index, (start, end) in enumerate(zip(self.stations, self.stations[1:])):
-            start_point = pygame.Vector2(start.position)
-            segment = pygame.Vector2(end.position) - start_point
-            if segment.length_squared() == 0:
-                continue
-            ratio = max(0, min(1, (target - start_point).dot(segment) / segment.length_squared()))
-            closest = start_point + segment * ratio
+        for index, (start, end) in enumerate(self.segments):
+            ratio = closest_point_ratio(target, start.position, end.position)
+            closest = pygame.Vector2(start.position).lerp(pygame.Vector2(end.position), ratio)
             if target.distance_to(closest) <= tolerance:
                 return index
         return None
 
-    def endpoint_at(self, point, line_index=0, line_count=1, tolerance=12):
+    # ------------------------------------------------------------------ handles
+    def endpoint_at(self, point, line_index=0, line_count=1, tolerance=14):
         if self.is_loop:
             return None
         target = pygame.Vector2(point)
-        start_distance = target.distance_to(self.handle_position("start", line_index, line_count))
-        end_distance = target.distance_to(self.handle_position("end", line_index, line_count))
-        if start_distance <= tolerance:
-            return "start"
-        if end_distance <= tolerance:
-            return "end"
+        for endpoint in ("start", "end"):
+            if target.distance_to(self.handle_position(endpoint, line_index, line_count)) <= tolerance:
+                return endpoint
         return None
 
     def endpoint_position(self, endpoint):
         if endpoint == "start":
-            station = self.stations[0]
-            neighbor = self.stations[1]
-            direction = pygame.Vector2(station.position) - pygame.Vector2(neighbor.position)
+            station, neighbor = self.stations[0], self.stations[1]
         else:
-            station = self.stations[-1]
-            neighbor = self.stations[-2]
-            direction = pygame.Vector2(station.position) - pygame.Vector2(neighbor.position)
-        return pygame.Vector2(station.position) + direction.normalize() * (station.radius + 9)
+            station, neighbor = self.stations[-1], self.stations[-2]
+        direction = pygame.Vector2(station.position) - pygame.Vector2(neighbor.position)
+        if direction.length_squared() == 0:
+            direction = pygame.Vector2(1, 0)
+        return pygame.Vector2(station.position) + direction.normalize() * (station.radius + 16)
 
     def handle_position(self, endpoint, line_index=0, line_count=1):
         position = self.endpoint_position(endpoint)
@@ -132,33 +142,26 @@ class MetroLine:
     def draw_endpoints(self, surface, line_index=0, line_count=1):
         if self.is_loop:
             return
-        for index, station in ((0, self.stations[0]), (-1, self.stations[-1])):
-            endpoint = self.handle_position("start" if index == 0 else "end", line_index, line_count)
-            direction = pygame.Vector2(station.position) - endpoint
-            perpendicular = direction.normalize().rotate(90) * 11
-            start = endpoint - perpendicular
-            end = endpoint + perpendicular
-            pygame.draw.line(surface, self.color, start, end, 8)
+        for endpoint, station in (("start", self.stations[0]), ("end", self.stations[-1])):
+            handle = self.handle_position(endpoint, line_index, line_count)
+            towards_station = pygame.Vector2(station.position) - handle
+            stem_end = pygame.Vector2(station.position) - towards_station.normalize() * station.radius
+            draw_thick_line(surface, self.color, stem_end, handle, LINE_WIDTH)
+            bar = towards_station.normalize().rotate(90) * 10
+            draw_thick_line(surface, self.color, handle - bar, handle + bar, LINE_WIDTH + 1)
 
+    # ------------------------------------------------------------------ drawing
     def draw(self, surface, offsets=None):
-        segments = list(zip(self.stations, self.stations[1:]))
-        if self.is_loop:
-            segments.append((self.stations[-1], self.stations[0]))
-        for index, (start, end) in enumerate(segments):
-            start_point = pygame.Vector2(start.position)
-            end_point = pygame.Vector2(end.position)
-            direction = end_point - start_point
-            offset = offsets[index][2] if offsets else 0
-            if offset and direction.length_squared():
-                if id(start) > id(end):
-                    direction = -direction
-                shift = direction.normalize().rotate(90) * offset
-                start_point += shift
-                end_point += shift
-            draw_smooth_line(surface, self.color, start_point, end_point, LINE_WIDTH)
-
-    def contains_pair(self, first_station, second_station):
-        return any(
-            {start, end} == {first_station, second_station}
-            for start, end in zip(self.stations, self.stations[1:])
-        )
+        for index, (start, end) in enumerate(self.segments):
+            offset = offsets[index] if offsets else 0
+            shift = segment_shift(start, end, offset)
+            draw_thick_line(
+                surface,
+                self.color,
+                pygame.Vector2(start.position) + shift,
+                pygame.Vector2(end.position) + shift,
+                LINE_WIDTH,
+                round_caps=False,
+            )
+            draw_disc(surface, self.color, pygame.Vector2(start.position) + shift, LINE_WIDTH / 2)
+            draw_disc(surface, self.color, pygame.Vector2(end.position) + shift, LINE_WIDTH / 2)

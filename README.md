@@ -20,9 +20,18 @@ Build colored metro lines, place trains on them, and keep passengers moving betw
 - Add extra trains by dragging a metro asset from the `+ METRO` control onto a line.
 - Move existing trains between lines. Trains finish their current trip, unload passengers at the next station, and then continue empty on the new line.
 - Up to five trains can run on each line.
-- New stations and passengers appear over time, creating increasing network pressure.
+- Difficulty ramps up: up to twelve stations appear over time and passengers arrive faster the longer you survive.
+- A new station that appears on top of an existing line is connected to that line automatically.
+- Up to six colored lines.
+- Best score is saved between sessions, and a clock shows how long the network has survived.
+- Short messages explain why an action is not possible (all lines in use, line full, no metro available).
+- Generated sound effects for deliveries, building, warnings, and game over. No audio files needed.
+- Resizable window and fullscreen; the game scales to fit.
+- Passengers plan multi-line journeys and change trains at shared stations.
+- Delete a whole line by dragging an endpoint back onto its only other station; extra trains return to the depot.
+- Overcrowded stations show a red progress ring that pulses when the station is full.
 - Game over and restart flow when too many passengers are missed.
-- Smooth antialiased route rendering and a custom background asset.
+- Clean minimal look: antialiased lines and stations, trains that rotate along the track, floating `+1` delivery markers, and HUD cards.
 
 ## Gameplay Controls
 
@@ -32,9 +41,15 @@ Build colored metro lines, place trains on them, and keep passengers moving betw
 | Extend a line | Drag an endpoint handle to a new station. |
 | Insert a station | Drag from an existing line segment to a station. |
 | Create a loop | Drag one endpoint handle to the opposite endpoint. |
+| Shorten a line | Drag an endpoint handle back onto the neighbouring station. |
+| Delete a line | Shorten a two-station line by dragging its endpoint onto the other station. |
 | Add a train | Click `+ METRO`, drag the metro asset onto a line, and release. |
 | Move a train | Click an existing train and drag it onto another line. |
-| Restart | Press `R` after the network is overloaded. |
+| Pause / resume | Press `Space` or click `Pause`. Lines can still be edited while paused. |
+| Cancel a drag | Press `Esc`. |
+| Fullscreen | Press `F11` (`Esc` or `F11` to leave). The window can also be resized. |
+| Mute / unmute | Press `M`. |
+| Restart | Click `Play again` or press `R` after the network is overloaded. |
 
 ## Installation
 
@@ -68,7 +83,6 @@ py main.py
 ```text
 minimal-transit/
 ├── assets/
-│   ├── background_metro.png
 │   ├── background_metro2.avif
 │   ├── circle.svg
 │   ├── metro.svg
@@ -77,10 +91,13 @@ minimal-transit/
 ├── background.py       # Background asset loading
 ├── config.py           # Game settings, colors, and limits
 ├── connection.py       # Geometry for route segments
+├── render.py           # Fonts and antialiased drawing helpers
 ├── game.py             # Main game state and event loop
 ├── line.py             # Metro lines and route editing
 ├── passenger.py        # Passenger destinations and rendering
+├── sound.py            # Generated sound effects
 ├── station.py          # Station shapes and waiting passengers
+├── storage.py          # Best score persistence (save.json)
 ├── train.py            # Train movement, stops, boarding, and transfers
 ├── main.py             # Application entry point
 └── requirements.txt    # Python dependencies
@@ -93,17 +110,20 @@ Gameplay values are centralized in [config.py](config.py). You can adjust values
 - train capacity
 - maximum trains per line
 - train speed and acceleration
-- passenger spawn interval
-- station spawn interval
+- passenger spawn interval (starting value, minimum, and how fast it ramps)
+- station spawn interval and maximum number of stations
+- line colors (the number of colors is the number of lines)
+- sound volume
 - waiting passenger limit
 - game-over threshold
 
 ## Technical Notes
 
-- The game window is `800x600`.
+- The game is drawn on an `800x600` canvas that is scaled to the window, keeping its aspect ratio.
+- The best score is stored in `save.json` next to the game (ignored by git).
 - Route editing uses geometric hit testing for stations, endpoints, and line segments.
 - Passenger transfers use shared stations between metro lines.
-- The AVIF background is loaded through Pillow and `pillow-avif-plugin`; a PNG asset is available as a fallback.
+- The AVIF background is loaded through Pillow and `pillow-avif-plugin`. If it cannot be loaded, a generated paper-style background is used instead.
 
 ## License
 

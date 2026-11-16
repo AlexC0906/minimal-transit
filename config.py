@@ -3,11 +3,20 @@
 WIDTH = 800
 HEIGHT = 600
 FPS = 60
+MAX_FRAME_TIME = 0.05
 STATION_SPAWN_INTERVAL = 8.0
-MAX_STATIONS = 8
+# Each new station takes this much longer to appear than the previous one.
+STATION_SPAWN_GROWTH = 3.0
+MAX_STATIONS = 12
 STATION_MARGIN = 70
 MIN_STATION_DISTANCE = 90
-PASSENGER_SPAWN_INTERVAL = 3.0
+STATION_RADIUS = 18
+# A new station that appears this close to a line is added to that line automatically.
+AUTO_CONNECT_DISTANCE = 26
+# Seconds between passengers at one station: starts slow, ramps down to the minimum.
+PASSENGER_SPAWN_INTERVAL = 4.5
+PASSENGER_SPAWN_INTERVAL_MIN = 2.5
+DIFFICULTY_RAMP_TIME = 360.0
 TRAIN_CAPACITY = 6
 MAX_TRAINS_PER_LINE = 5
 TRAIN_CREDIT_INTERVAL = 60.0
@@ -18,17 +27,39 @@ TRAIN_STOP_TIME = 1.0
 MAX_WAITING_PASSENGERS = 8
 MAX_MISSED_PASSENGERS = 3
 
-BG_COLOR = (245, 245, 247)
-STATION_COLOR = (29, 29, 31)
-LINE_COLOR = (0, 122, 255)
-LINE_COLORS = [(0, 122, 255), (235, 75, 75), (45, 180, 115), (150, 90, 210)]
-SHARED_LINE_OFFSET = 12
-LINE_WIDTH = 5
+# Palette
+BG_COLOR = (244, 242, 237)
+BG_TINT = (246, 244, 239, 150)
+LETTERBOX_COLOR = (226, 224, 218)
+SUCCESS_COLOR = (38, 170, 94)
+TEXT_COLOR = (30, 31, 36)
+MUTED_TEXT_COLOR = (118, 118, 128)
+CARD_COLOR = (255, 255, 255)
+STATION_FILL = (255, 255, 255)
+STATION_COLOR = (30, 31, 36)
+DARK_BUTTON = (30, 31, 36)
+DISABLED_BUTTON = (190, 190, 196)
+WARNING_COLOR = (226, 68, 64)
+
+LINE_COLORS = [
+    (47, 118, 237),
+    (230, 76, 60),
+    (38, 170, 94),
+    (142, 84, 200),
+    (226, 84, 150),
+    (150, 108, 74),
+]
+LINE_COLOR = LINE_COLORS[0]
+SHARED_LINE_OFFSET = 9
+LINE_WIDTH = 7
 MAX_LINES = len(LINE_COLORS)
 DRAWING_COLOR = (170, 200, 255)
-WARNING_COLOR = (235, 75, 75)
+
+SHAPES = ("circle", "square", "triangle")
 SHAPE_COLORS = {
-	"circle": (16, 16, 184),
-	"square": (255, 189, 33),
-	"triangle": (128, 179, 154),
+    "circle": (52, 70, 150),
+    "square": (240, 164, 0),
+    "triangle": (20, 158, 160),
 }
+
+SOUND_VOLUME = 0.35
